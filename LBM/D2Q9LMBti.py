@@ -1,0 +1,193 @@
+import taichi as ti
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+real = ti.f32
+
+Nx = 400
+Ny = 100
+# Nx = 16
+# Ny = 16
+tau = .53
+noise_amp = 1e-3  # amplitude of initial random perturbation, similar to 0.01 * np.random.rand(...)
+
+Nv = 9
+# Use dtype instead of deprecated dt, and keep integer types for lattice velocities
+veloI = ti.Vector([0, 0, 1, 0, -1, 1, 1, -1, -1], dt=ti.i32)
+veloJ = ti.Vector([0, 1, 0, -1, 0, 1, -1, -1, 1], dt=ti.i32)
+weights = ti.Vector([16.0, 4.0, 4.0, 4.0, 4.0, 1.0, 1.0, 1.0, 1.0], dt=real) / 36.0
+
+rho = 10.34
+ux = 1.28 / rho
+uy = 0 / rho
+
+@ti.func
+def setfeq(rho, ux, uy):
+    cdot = veloI * ux + veloJ * uy
+    return rho * weights * (
+        1 + 3 * cdot + 9/2 * cdot**2 - 3/2 * (ux**2 + uy**2)
+    )
+
+# movingfeq = setfeq(rho, ux, uy)
+# staticfeq = setfeq(rho, 0, 0)
+
+# Geometry: circular cylinder obstacle (match numpy reference)
+radius = 13
+cylinder = np.full((Nx, Ny), False)
+center = (Nx // 4, Ny // 2)
+for i in range(Nx):
+    for j in range(Ny):
+        if (i - center[0])**2 + (j - center[1])**2 < radius**2:
+            cylinder[i, j] = True
+
+ti.init(arch=ti.cpu)
+# cylinder_ti = ti.field(bool, shape=(Nx, Ny))
+cylinder_ti = ti.field(ti.u8, shape=(Nx, Ny))
+cylinder_ti.from_numpy(cylinder.astype(np.uint8))
+botzf = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny))
+botzf_prev = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny))
+primvars = ti.Vector.field(3, dtype=real, shape=(Nx, Ny)) # rho, ux, uy
+movingfeq = ti.Vector.field(Nv, dtype=real, shape=())
+staticfeq = ti.Vector.field(Nv, dtype=real, shape=())
+img = ti.field(dtype=real, shape=(Nx, Ny))  # image buffer for rendering
+nan_detected = ti.field(dtype=ti.i32, shape=())  # flag for NaN detection
+
+@ti.kernel
+def check_nan() -> int:
+    # Check if any NaN exists in botzf
+    nan_count = 0
+    for i, j, k in ti.ndrange(Nx, Ny, Nv):
+        if ti.math.isnan(botzf[i, j][k]):
+            nan_count += 1
+    return nan_count
+
+@ti.kernel
+def initialize():
+    movingfeq[None] = setfeq(rho, ux, uy)
+    staticfeq[None] = setfeq(rho, 0, 0)
+    for i, j in ti.ndrange(Nx, Ny):
+        if cylinder_ti[i, j]:
+            botzf[i, j] = staticfeq[None]
+        else:
+            for k in ti.static(range(Nv)):
+                # Add a small perturbation to trigger vortex shedding
+                # Keep distributions positive by using tiny uniform noise
+                botzf[i, j][k] = movingfeq[None][k] + noise_amp * (ti.random(real))
+
+# @ti.kernel
+# def initialize():
+#     # movingfeq[None] = setfeq(rho, ux, uy)
+#     staticfeq[None] = setfeq(rho, 0, 0)
+#     for i, j in ti.ndrange(Nx, Ny):
+#         botzf[i, j] = staticfeq[None]
+
+@ti.kernel
+def collision():
+    for i, j in ti.ndrange(Nx, Ny):
+        botzf_ = botzf[i, j]
+        rho = botzf_.sum()
+        ux = botzf_.dot(veloI) / rho
+        uy = botzf_.dot(veloJ) / rho
+        primvars[i, j] = [rho, ux, uy] # store
+        botzf_eq = setfeq(rho, ux, uy)
+        botzf_ = botzf_ + (botzf_eq - botzf_) / tau
+        botzf[i, j] = botzf_
+
+@ti.kernel
+def copy_botzf():
+    for i, j in ti.ndrange(Nx, Ny):
+        botzf_prev[i, j] = botzf[i, j]
+
+@ti.kernel
+def streaming():
+    for i, j in ti.ndrange(Nx, Ny):
+        for v in ti.static(range(Nv)):
+            botzf[i, j][v] = botzf_prev[(i - veloI[v] + Nx) % Nx, (j - veloJ[v] + Ny) % Ny][v]
+
+@ti.kernel
+def boundary_condition():
+    for i, j in ti.ndrange(Nx, Ny):
+        if cylinder_ti[i, j]:
+            # bounce-back boundary condition
+            botzf_ = botzf[i, j]
+            botzf_[1], botzf_[3] = botzf_[3], botzf_[1]
+            botzf_[2], botzf_[4] = botzf_[4], botzf_[2]
+            botzf_[5], botzf_[7] = botzf_[7], botzf_[5]
+            botzf_[6], botzf_[8] = botzf_[8], botzf_[6]
+            botzf[i, j] = botzf_
+        # Inlet (left boundary): impose equilibrium with target (rho, ux, uy)
+        # if i == 0:
+        #     botzf[0, j] = movingfeq[None]
+        # # Outlet (right boundary): simple zero-gradient copy from the previous column
+        # if i == Nx - 1:
+        #     botzf[Nx - 1, j] = botzf[Nx - 2, j]
+
+@ti.kernel
+def paint(img_mode: int):
+    # Pass 1: write raw scalar into img based on mode (0: density, 1: |u|)
+    for i, j in ti.ndrange(Nx, Ny):
+        rho_ = primvars[i, j][0]
+        ux_ = primvars[i, j][1]
+        uy_ = primvars[i, j][2]
+        val = rho_
+        if img_mode == 1:
+            val = ti.sqrt(ux_ * ux_ + uy_ * uy_)
+        img[i, j] = val
+
+    # Pass 2: find global min/max
+    max_ = -1.0e30
+    min_ = 1.0e30
+    for i, j in ti.ndrange(Nx, Ny):
+        ti.atomic_max(max_, img[i, j])
+        ti.atomic_min(min_, img[i, j])
+
+    # Pass 3: normalize to [0,1]
+    for i, j in ti.ndrange(Nx, Ny):
+        denom = max_ - min_
+        val = 0.0
+        if denom > 1e-12:
+            val = (img[i, j] - min_) / denom
+        img[i, j] = val
+                
+def main():
+    # Minimal GUI loop to render density (1) and velocity magnitude (2)
+    initialize()
+    gui = ti.GUI("LBM D2Q9", res=(Nx, Ny))
+    img_mode = 1  # 0: density, 1: |u|
+    it = 0
+    skip = 10  # render every 'skip' steps
+    while gui.running:
+        # Simulation step
+        copy_botzf()
+        streaming()
+        collision()
+
+        # boundary_condition()
+
+        # Check for NaN values - stop if any detected
+        if check_nan() > 0:
+            print(f"NaN detected in botzf at step {it}. Simulation stopped.")
+            break
+
+        # Render
+        if it % skip == 0:
+            paint(img_mode)
+            gui.set_image(img)
+        gui.show()
+        it += 1
+
+        # Simple key toggles: '1' for density, '2' for velocity magnitude
+        if gui.get_event():
+            if gui.event.key == '1':
+                img_mode = 0
+            elif gui.event.key == '2':
+                img_mode = 1
+
+# def main():
+#     initialize()
+#     collision()
+#     streaming()
+#     boundary_condition()
+
+if __name__ == '__main__':
+    main()
