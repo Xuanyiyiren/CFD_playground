@@ -1,15 +1,15 @@
 import taichi as ti
 import numpy as np
-import matplotlib.pyplot as plt
+from matplotlib import cm
 from tqdm import tqdm
 real = ti.f32
+cmap_name = "magma_r"  # python colormap
 
 Nx = 400
 Ny = 100
 # Nx = 16
 # Ny = 16
 tau = .53
-noise_amp = 1e-3  # amplitude of initial random perturbation, similar to 0.01 * np.random.rand(...)
 
 Nv = 9
 # Use dtype instead of deprecated dt, and keep integer types for lattice velocities
@@ -40,7 +40,7 @@ for i in range(Nx):
         if (i - center[0])**2 + (j - center[1])**2 < radius**2:
             cylinder[i, j] = True
 
-ti.init(arch=ti.cpu)
+ti.init(arch=ti.gpu)
 # cylinder_ti = ti.field(bool, shape=(Nx, Ny))
 cylinder_ti = ti.field(ti.u8, shape=(Nx, Ny))
 cylinder_ti.from_numpy(cylinder.astype(np.uint8))
@@ -72,7 +72,7 @@ def initialize():
             for k in ti.static(range(Nv)):
                 # Add a small perturbation to trigger vortex shedding
                 # Keep distributions positive by using tiny uniform noise
-                botzf[i, j][k] = movingfeq[None][k] + noise_amp * (ti.random(real))
+                botzf[i, j][k] = movingfeq[None][k] # + noise_amp * (ti.random(real))
 
 # @ti.kernel
 # def initialize():
@@ -116,11 +116,13 @@ def boundary_condition():
             botzf_[6], botzf_[8] = botzf_[8], botzf_[6]
             botzf[i, j] = botzf_
         # Inlet (left boundary): impose equilibrium with target (rho, ux, uy)
-        # if i == 0:
-        #     botzf[0, j] = movingfeq[None]
-        # # Outlet (right boundary): simple zero-gradient copy from the previous column
-        # if i == Nx - 1:
-        #     botzf[Nx - 1, j] = botzf[Nx - 2, j]
+        if i == 0:
+            botzf[0, j] = movingfeq[None]
+        # Outlet (right boundary): simple zero-gradient copy from the previous column
+        if i == Nx - 1:
+            botzf[Nx - 1, j][2] = botzf[Nx - 2, j][2]
+            botzf[Nx - 1, j][5] = botzf[Nx - 2, j][5]
+            botzf[Nx - 1, j][6] = botzf[Nx - 2, j][6]
 
 @ti.kernel
 def paint(img_mode: int):
@@ -153,17 +155,16 @@ def main():
     # Minimal GUI loop to render density (1) and velocity magnitude (2)
     initialize()
     gui = ti.GUI("LBM D2Q9", res=(Nx, Ny))
+    cmap = cm.get_cmap(cmap_name)
     img_mode = 1  # 0: density, 1: |u|
     it = 0
-    skip = 10  # render every 'skip' steps
+    skip = 20  # render every 'skip' steps
     while gui.running:
         # Simulation step
         copy_botzf()
         streaming()
         collision()
-
-        # boundary_condition()
-
+        boundary_condition()
         # Check for NaN values - stop if any detected
         if check_nan() > 0:
             print(f"NaN detected in botzf at step {it}. Simulation stopped.")
@@ -172,8 +173,8 @@ def main():
         # Render
         if it % skip == 0:
             paint(img_mode)
-            gui.set_image(img)
-        gui.show()
+            gui.set_image(cmap(img.to_numpy()))
+            gui.show()
         it += 1
 
         # Simple key toggles: '1' for density, '2' for velocity magnitude
