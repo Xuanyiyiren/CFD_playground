@@ -2,6 +2,8 @@ import taichi as ti
 import numpy as np
 from matplotlib import cm
 from tqdm import tqdm
+import os
+import shutil
 real = ti.f32
 cmap_name = "magma_r"  # python colormap
 
@@ -156,10 +158,17 @@ def main():
     initialize()
     gui = ti.GUI("LBM D2Q9", res=(Nx, Ny))
     cmap = cm.get_cmap(cmap_name)
+    # Prepare ./simufigs: clear then recreate before simulation
+    out_dir = './simufigs'
+    shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(out_dir, exist_ok=True)
     img_mode = 1  # 0: density, 1: |u|
     it = 0
-    skip = 20  # render every 'skip' steps
-    while gui.running:
+    skip = 50  # render every 'skip' steps
+    max_steps = 15000  # maximum simulation steps
+    frame = 0
+    pbar = tqdm(total=max_steps, desc="Simulating", unit="step")
+    while gui.running and it < max_steps:
         # Simulation step
         copy_botzf()
         streaming()
@@ -174,8 +183,10 @@ def main():
         if it % skip == 0:
             paint(img_mode)
             gui.set_image(cmap(img.to_numpy()))
-            gui.show()
+            gui.show(os.path.join(out_dir, f'frame_{frame:05d}.png'))
+            frame += 1
         it += 1
+        pbar.update(1)
 
         # Simple key toggles: '1' for density, '2' for velocity magnitude
         if gui.get_event():
@@ -183,6 +194,7 @@ def main():
                 img_mode = 0
             elif gui.event.key == '2':
                 img_mode = 1
+    pbar.close()
 
 # def main():
 #     initialize()
