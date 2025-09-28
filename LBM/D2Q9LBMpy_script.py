@@ -145,11 +145,11 @@ for it in trange(Nt, desc='LBM Simulation'):
 # R = const.k_B * const.N_A
 # M = 29 * units.g/units.mol
 # T = (25 + 273.15)*units.K  # temperature in Kelvin
-# ref_vel = np.sqrt(3*R*T/M).si
+# xi_vel = np.sqrt(3*R*T/M).si
 
 # # Choose dx = 0.01 m, domain 1m x 4m
 # dx = 0.01 * units.m
-# dt = dx / ref_vel
+# dt = dx / xi_vel
 
 # # Total simulation time
 # total_time = dt * Nt
