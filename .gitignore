@@ -1,3 +1,4 @@
-*simufigs
-*__pycache__
+*simufigs/
+*vtk/
+*__pycache__/
 *.mp4

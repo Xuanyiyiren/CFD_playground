@@ -152,6 +152,44 @@ def paint(img_mode: int):
         if denom > 1e-12:
             val = (img[i, j] - min_) / denom
         img[i, j] = val
+
+def write_vtk(step: int, out_dir: str = './vtk'):
+    # Export current rho and velocity fields to legacy VTK (STRUCTURED_POINTS) in BINARY
+    os.makedirs(out_dir, exist_ok=True)
+    prim = primvars.to_numpy()  # shape: (Nx, Ny, 3) -> rho, ux, uy
+    rho_np = prim[..., 0]
+    ux_np = prim[..., 1]
+    uy_np = prim[..., 2]
+    obs_np = cylinder_ti.to_numpy()  # 0/1 obstacle mask
+    fname = os.path.join(out_dir, f'step_{step:05d}.vtk')
+    with open(fname, 'wb') as f:
+        # Header (ASCII)
+        f.write(b'# vtk DataFile Version 3.0\n')
+        f.write(b'LBM D2Q9 output\n')
+        f.write(b'BINARY\n')
+        f.write(b'DATASET STRUCTURED_POINTS\n')
+        f.write(f'DIMENSIONS {Nx} {Ny} 1\n'.encode('ascii'))
+        f.write(b'ORIGIN 0 0 0\n')
+        f.write(b'SPACING 1 1 1\n')
+        f.write(f'POINT_DATA {Nx * Ny}\n'.encode('ascii'))
+
+        # Density scalar (binary, big-endian float32)
+        f.write(b'SCALARS density float 1\n')
+        f.write(b'LOOKUP_TABLE default\n')
+        rho_be = rho_np.T.astype('>f4')  # transpose to keep i fastest, j outer
+        f.write(rho_be.tobytes(order='C'))
+
+        # Velocity vector (ux, uy, 0) (binary, big-endian float32)
+        f.write(b'\nVECTORS velocity float\n')
+        vel_np = np.stack([ux_np, uy_np, np.zeros_like(ux_np)], axis=2)  # (Nx, Ny, 3)
+        vel_be = vel_np.transpose(1, 0, 2).astype('>f4')  # (Ny, Nx, 3)
+        f.write(vel_be.tobytes(order='C'))
+
+        # Obstacle mask as unsigned_char
+        f.write(b'\nSCALARS obstacle unsigned_char 1\n')
+        f.write(b'LOOKUP_TABLE default\n')
+        obs_be = obs_np.T.astype(np.uint8)
+        f.write(obs_be.tobytes(order='C'))
                 
 def main():
     # Minimal GUI loop to render density (1) and velocity magnitude (2)
@@ -162,11 +200,17 @@ def main():
     out_dir = './simufigs'
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
+    # Prepare ./vtk for ParaView
+    vtk_out_dir = './vtk'
+    shutil.rmtree(vtk_out_dir, ignore_errors=True)
+    os.makedirs(vtk_out_dir, exist_ok=True)
     img_mode = 1  # 0: density, 1: |u|
     it = 0
-    skip = 50  # render every 'skip' steps
+    render_skip = 50  # render every 'skip' steps
+    vtk_skip = 50  # export VTK every 'vtk_skip' steps
     max_steps = 15000  # maximum simulation steps
     frame = 0
+    vtk_frame = 0
     pbar = tqdm(total=max_steps, desc="Simulating", unit="step")
     while gui.running and it < max_steps:
         # Simulation step
@@ -180,11 +224,15 @@ def main():
             break
 
         # Render
-        if it % skip == 0:
+        if it % render_skip == 0:
             paint(img_mode)
             gui.set_image(cmap(img.to_numpy()))
             gui.show(os.path.join(out_dir, f'frame_{frame:05d}.png'))
             frame += 1
+        # Export VTK for ParaView
+        if it % vtk_skip == 0:
+            write_vtk(vtk_frame, vtk_out_dir)
+            vtk_frame += 1
         it += 1
         pbar.update(1)
 
