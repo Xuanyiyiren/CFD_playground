@@ -4,6 +4,7 @@ from matplotlib import cm
 from tqdm import tqdm
 import os
 import shutil
+import pyvista as pv
 real = ti.f32
 cmap_name = "magma_r"  # python colormap
 
@@ -42,7 +43,7 @@ for i in range(Nx):
         if (i - center[0])**2 + (j - center[1])**2 < radius**2:
             cylinder[i, j] = True
 
-ti.init(arch=ti.gpu)
+ti.init(arch=ti.cpu)
 # cylinder_ti = ti.field(bool, shape=(Nx, Ny))
 cylinder_ti = ti.field(ti.u8, shape=(Nx, Ny))
 cylinder_ti.from_numpy(cylinder.astype(np.uint8))
@@ -154,42 +155,46 @@ def paint(img_mode: int):
         img[i, j] = val
 
 def write_vtk(step: int, out_dir: str = './vtk'):
-    # Export current rho and velocity fields to legacy VTK (STRUCTURED_POINTS) in BINARY
+    """使用 pyvista 生成并保存 VTK（legacy .vtk）文件。
+
+    输出为 ImageData（VTK STRUCTURED_POINTS/UniformGrid 等价），对应点数据包含：
+    - density: float32 标量
+    - velocity: float32 三分量向量 (ux, uy, 0)
+    - obstacle: uint8 标量（障碍物掩码）
+    """
     os.makedirs(out_dir, exist_ok=True)
-    prim = primvars.to_numpy()  # shape: (Nx, Ny, 3) -> rho, ux, uy
+
+    # 提取当前原始变量（rho, ux, uy）与障碍物掩码
+    prim = primvars.to_numpy()  # (Nx, Ny, 3)
     rho_np = prim[..., 0]
     ux_np = prim[..., 1]
     uy_np = prim[..., 2]
-    obs_np = cylinder_ti.to_numpy()  # 0/1 obstacle mask
+    obs_np = cylinder_ti.to_numpy()  # (Nx, Ny) -> 0/1
+
+    # 构建 ImageData（与 STRUCTURED_POINTS/UniformGrid 等价，兼容旧版本 PyVista）
+    grid = pv.ImageData()
+    grid.dimensions = (Nx, Ny, 1)  # 点数（而非单元数）
+    grid.origin = (0.0, 0.0, 0.0)
+    grid.spacing = (1.0, 1.0, 1.0)
+
+    # 为与 VTK 点顺序一致：VTK 使用 x 变化最快、y 次之、z 最慢
+    # 由于 numpy 数组形状为 (Nx, Ny)，直接使用 Fortran 顺序展平即可匹配 VTK 点顺序
+    rho_flat = rho_np.flatten(order='F').astype(np.float32)
+    ux_flat = ux_np.flatten(order='F').astype(np.float32)
+    uy_flat = uy_np.flatten(order='F').astype(np.float32)
+    obs_flat = obs_np.flatten(order='F').astype(np.uint8)
+
+    # 写入点数据
+    grid.point_data['density'] = rho_flat
+    vel = np.column_stack(
+        [ux_flat, uy_flat, np.zeros_like(ux_flat, dtype=np.float32)]
+    ).astype(np.float32)
+    grid.point_data['velocity'] = vel
+    grid.point_data['obstacle'] = obs_flat
+
+    # 保存为 legacy VTK（.vtk）
     fname = os.path.join(out_dir, f'step_{step:05d}.vtk')
-    with open(fname, 'wb') as f:
-        # Header (ASCII)
-        f.write(b'# vtk DataFile Version 3.0\n')
-        f.write(b'LBM D2Q9 output\n')
-        f.write(b'BINARY\n')
-        f.write(b'DATASET STRUCTURED_POINTS\n')
-        f.write(f'DIMENSIONS {Nx} {Ny} 1\n'.encode('ascii'))
-        f.write(b'ORIGIN 0 0 0\n')
-        f.write(b'SPACING 1 1 1\n')
-        f.write(f'POINT_DATA {Nx * Ny}\n'.encode('ascii'))
-
-        # Density scalar (binary, big-endian float32)
-        f.write(b'SCALARS density float 1\n')
-        f.write(b'LOOKUP_TABLE default\n')
-        rho_be = rho_np.T.astype('>f4')  # transpose to keep i fastest, j outer
-        f.write(rho_be.tobytes(order='C'))
-
-        # Velocity vector (ux, uy, 0) (binary, big-endian float32)
-        f.write(b'\nVECTORS velocity float\n')
-        vel_np = np.stack([ux_np, uy_np, np.zeros_like(ux_np)], axis=2)  # (Nx, Ny, 3)
-        vel_be = vel_np.transpose(1, 0, 2).astype('>f4')  # (Ny, Nx, 3)
-        f.write(vel_be.tobytes(order='C'))
-
-        # Obstacle mask as unsigned_char
-        f.write(b'\nSCALARS obstacle unsigned_char 1\n')
-        f.write(b'LOOKUP_TABLE default\n')
-        obs_be = obs_np.T.astype(np.uint8)
-        f.write(obs_be.tobytes(order='C'))
+    grid.save(fname)
                 
 def main():
     # Minimal GUI loop to render density (1) and velocity magnitude (2)
