@@ -12,7 +12,7 @@ Nx = 400
 Ny = 200
 # Nx = 16
 # Ny = 16
-tau = .503
+tau = .504
 
 Nv = 9
 # Use dtype instead of deprecated dt, and keep integer types for lattice velocities
@@ -20,18 +20,16 @@ veloI = ti.Vector([0, 0, 1, 0, -1, 1, 1, -1, -1], dt=ti.i32)
 veloJ = ti.Vector([0, 1, 0, -1, 0, 1, -1, -1, 1], dt=ti.i32)
 weights = ti.Vector([16.0, 4.0, 4.0, 4.0, 4.0, 1.0, 1.0, 1.0, 1.0], dt=real) / 36.0
 
-rho_ref = 1
-rho_ave = 1
-drho_ref = rho_ref - rho_ave
-ux_ref = 0.1
-uy_ref = 0
+rho = 1
+ux = 0.1
+uy = 0
 
 @ti.func
-def setfeq(drho, ux, uy):
+def setfeq(rho, ux, uy):
     cdot = veloI * ux + veloJ * uy
-    return (drho + rho_ave) * weights * (
+    return (rho) * weights * (
         1 + 3 * cdot + 9/2 * cdot**2 - 3/2 * (ux**2 + uy**2)
-    ) - weights * rho_ave
+    )
 
 # movingfeq = setfeq(rho, ux, uy)
 # staticfeq = setfeq(rho, 0, 0)
@@ -68,8 +66,8 @@ def check_nan() -> int:
 
 @ti.kernel
 def initialize():
-    movingfeq[None] = setfeq(drho_ref, ux_ref, uy_ref)
-    staticfeq[None] = setfeq(drho_ref, 0, 0)
+    movingfeq[None] = setfeq(rho, ux, uy)
+    staticfeq[None] = setfeq(rho, 0, 0)
     for i, j in ti.ndrange(Nx, Ny):
         if cylinder_ti[i, j]:
             botzf[i, j] = staticfeq[None]
@@ -90,7 +88,7 @@ def initialize():
 def collision():
     for i, j in ti.ndrange(Nx, Ny):
         botzf_ = botzf[i, j]
-        rho = botzf_.sum() + rho_ave
+        rho = botzf_.sum()
         ux = botzf_.dot(veloI) / rho
         uy = botzf_.dot(veloJ) / rho
         primvars[i, j] = [rho, ux, uy] # store
