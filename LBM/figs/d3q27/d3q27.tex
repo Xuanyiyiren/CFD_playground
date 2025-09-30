@@ -1,0 +1,108 @@
+\documentclass[tikz,border=5pt]{standalone}
+\usepackage{amsmath}
+\usetikzlibrary{arrows.meta,3d}
+\usepackage{tikz-3dplot}
+
+% 样式与宏：集中定义以减少重复，保持原有视觉
+\tikzset{
+    edge visible/.style={gray,thin},
+    edge hidden/.style={gray,thin,dashed},
+    gridnode/.style={circle,fill=black,minimum size=4pt,inner sep=0pt},
+    centernode/.style={circle,fill=green!60!black,minimum size=6pt,inner sep=0pt},
+    dirarrow/.style={gray,->,line width=2pt,opacity=0.7},
+    weightlabel/.style={blue,anchor=north east},
+    dirnum/.style={red,font=\footnotesize}
+}
+
+% 方向列表：保持与原图一致
+\def\DIRECTIONS{
+    1/0/0, -1/0/0, 0/1/0, 0/-1/0, 0/0/1, 0/0/-1,
+    1/1/0, 1/-1/0, -1/1/0, -1/-1/0,
+    1/0/1, 1/0/-1, -1/0/1, -1/0/-1,
+    0/1/1, 0/1/-1, 0/-1/1, 0/-1/-1,
+    1/1/1, 1/1/-1, 1/-1/1, 1/-1/-1,
+    -1/1/1, -1/1/-1, -1/-1/1, -1/-1/-1
+}
+
+\begin{document}
+\tdplotsetmaincoords{70}{120}
+\begin{tikzpicture}[scale=2.5,>=Stealth,tdplot_main_coords]
+
+    % 立方体框架
+    \draw[edge hidden] (-1,-1,-1) -- (1,-1,-1);
+    \draw[edge hidden] (-1,-1,-1) -- (-1,1,-1);
+    \draw[edge hidden] (-1,-1,-1) -- (-1,-1,1);
+    \draw[edge visible] (1,-1,-1) -- (1,1,-1) -- (-1,1,-1) -- (-1,-1,-1);
+    \draw[edge visible] (1,-1,-1) -- (1,-1,1) -- (1,1,1) -- (1,1,-1);
+    \draw[edge visible] (1,-1,1) -- (-1,-1,1) -- (-1,1,1) -- (1,1,1);
+    \draw[edge visible] (-1,1,-1) -- (-1,1,1);
+    \draw[edge visible] (-1,-1,1) -- (1,-1,1);
+    \draw[edge visible] (1,1,-1) -- (1,1,1);
+
+    % 3x3x3 网格节点
+    \foreach \x in {-1,0,1} {
+        \foreach \y in {-1,0,1} {
+            \foreach \z in {-1,0,1} {
+                \node[gridnode] at (\x,\y,\z) {};
+            }
+        }
+    }
+
+    % 中心绿色节点 (0,0,0)
+    \node[centernode] (center) at (0,0,0) {};
+
+    % 27 个方向的箭头 - 精确指向各个节点
+    \foreach \x/\y/\z in \DIRECTIONS {
+        \draw[dirarrow] (center) -- (\x,\y,\z);
+    }
+
+    % 权重系数标注 (每个类别标注一个代表性的)
+    \node[weightlabel] at (0,0,0) {$\frac{8}{27}$};     % 中心权重
+    \node[weightlabel] at (1,0,0) {$\frac{2}{27}$};     % 面心权重 (代表)
+    \node[weightlabel] at (1,1,0) {$\frac{1}{54}$};     % 边心权重 (代表)
+    \node[weightlabel] at (1,1,1) {$\frac{1}{216}$};    % 角点权重 (代表)
+
+    % 完整的方向编号标注 (0-26)
+    \node[dirnum,anchor=south east] at (0,0,0) {0}; % 中心
+
+    % 面心方向 (6 个)
+    \node[dirnum,anchor=south west] at (1,0,0) {1};   % +x
+    \node[dirnum,anchor=south east] at (-1,0,0) {2};  % -x
+    \node[dirnum,anchor=south west] at (0,1,0) {3};   % +y
+    \node[dirnum,anchor=south east] at (0,-1,0) {4};  % -y
+    \node[dirnum,anchor=south west] at (0,0,1) {5};   % +z
+    \node[dirnum,anchor=south east] at (0,0,-1) {6};  % -z
+
+    % 边心方向 (12 个) - xy 平面
+    \node[dirnum,anchor=south west] at (1,1,0) {7};    % +x+y
+    \node[dirnum,anchor=south east] at (-1,1,0) {8};   % -x+y
+    \node[dirnum,anchor=south west] at (1,-1,0) {9};   % +x-y
+    \node[dirnum,anchor=south east] at (-1,-1,0) {10}; % -x-y
+
+    % 边心方向 - xz 平面
+    \node[dirnum,anchor=south west] at (1,0,1) {11};   % +x+z
+    \node[dirnum,anchor=south east] at (-1,0,1) {12};  % -x+z
+    \node[dirnum,anchor=south west] at (1,0,-1) {13};  % +x-z
+    \node[dirnum,anchor=south east] at (-1,0,-1) {14}; % -x-z
+
+    % 边心方向 - yz 平面
+    \node[dirnum,anchor=south west] at (0,1,1) {15};   % +y+z
+    \node[dirnum,anchor=south east] at (0,-1,1) {16};  % -y+z
+    \node[dirnum,anchor=south west] at (0,1,-1) {17};  % +y-z
+    \node[dirnum,anchor=south east] at (0,-1,-1) {18}; % -y-z
+
+    % 角点方向 (8 个)
+    \node[dirnum,anchor=south west] at (1,1,1) {19};   % +x+y+z
+    \node[dirnum,anchor=south east] at (-1,1,1) {20};  % -x+y+z
+    \node[dirnum,anchor=south west] at (1,-1,1) {21};  % +x-y+z
+    \node[dirnum,anchor=south east] at (-1,-1,1) {22}; % -x-y+z
+    \node[dirnum,anchor=south west] at (1,1,-1) {23};  % +x+y-z
+    \node[dirnum,anchor=south east] at (-1,1,-1) {24}; % -x+y-z
+    \node[dirnum,anchor=south west] at (1,-1,-1) {25}; % +x-y-z
+    \node[dirnum,anchor=south east] at (-1,-1,-1) {26};% -x-y-z
+
+    % 标题
+    \node[font=\Large] at (0,-2,0) {D3Q27};
+
+\end{tikzpicture}
+\end{document}
