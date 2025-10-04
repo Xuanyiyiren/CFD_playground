@@ -12,7 +12,7 @@ Nx = 400
 Ny = 200
 # Nx = 16
 # Ny = 16
-tau = .506
+tau = .510
 
 Nv = 9
 # Use dtype instead of deprecated dt, and keep integer types for lattice velocities
@@ -21,8 +21,8 @@ veloJ = ti.Vector([0, 1, 0, -1, 0, 1, -1, -1, 1], dt=ti.i32)
 weights = ti.Vector([16.0, 4.0, 4.0, 4.0, 4.0, 1.0, 1.0, 1.0, 1.0], dt=real) / 36.0
 
 rho_ref = 1
-rho_ave = 0
-drho_ref = rho_ref - rho_ave
+rho_ave = 1
+# drho_ref = rho_ref - rho_ave
 ux_ref = 0.1
 uy_ref = 0
 
@@ -45,7 +45,7 @@ for i in range(Nx):
         if (i - center[0])**2 + (j - center[1])**2 < radius**2:
             cylinder[i, j] = True
 
-ti.init(arch=ti.cpu)
+ti.init(arch=ti.gpu)
 # cylinder_ti = ti.field(bool, shape=(Nx, Ny))
 cylinder_ti = ti.field(ti.u8, shape=(Nx, Ny))
 cylinder_ti.from_numpy(cylinder.astype(np.uint8))
