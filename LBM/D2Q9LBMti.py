@@ -12,7 +12,7 @@ Nx = 400
 Ny = 200
 # Nx = 16
 # Ny = 16
-tau = .510
+tau = .520 # .510
 
 Nv = 9
 # Use dtype instead of deprecated dt, and keep integer types for lattice velocities
@@ -49,9 +49,12 @@ ti.init(arch=ti.gpu)
 # cylinder_ti = ti.field(bool, shape=(Nx, Ny))
 cylinder_ti = ti.field(ti.u8, shape=(Nx, Ny))
 cylinder_ti.from_numpy(cylinder.astype(np.uint8))
-botzf = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny))
-botzf_prev = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny))
-primvars = ti.Vector.field(3, dtype=real, shape=(Nx, Ny)) # rho, ux, uy
+botzf = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny), layout=ti.Layout.AOS)
+botzf_prev = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny), layout=ti.Layout.AOS)
+primvars = ti.Vector.field(3, dtype=real, shape=(Nx, Ny), layout=ti.Layout.AOS) # rho, ux, uy
+# botzf = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny), layout=ti.Layout.SOA)
+# botzf_prev = ti.Vector.field(Nv, dtype=real, shape=(Nx, Ny), layout=ti.Layout.SOA)
+# primvars = ti.Vector.field(3, dtype=real, shape=(Nx, Ny), layout=ti.Layout.SOA) # rho, ux, uy
 movingfeq = ti.Vector.field(Nv, dtype=real, shape=())
 staticfeq = ti.Vector.field(Nv, dtype=real, shape=())
 img = ti.field(dtype=real, shape=(Nx, Ny))  # image buffer for rendering
